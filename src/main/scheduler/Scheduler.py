@@ -34,6 +34,12 @@ def create_patient(tokens):
     if username_exists_patient(username):
         print("Username taken, try again")
         return
+
+    #check password strength
+    if password_strength(password) is False:
+        print("Create patient failed")
+        return
+    
     salt = Util.generate_salt()
     hash = Util.generate_hash(password, salt)
 
@@ -61,6 +67,11 @@ def create_caregiver(tokens):
     # check 2: check if the username has been taken already
     if username_exists_caregiver(username):
         print("Username taken, try again!")
+        return
+    
+    #check password strength
+    if password_strength(password) is False:
+        print("Create user failed")
         return
 
     salt = Util.generate_salt()
@@ -498,8 +509,68 @@ def upload_availability(tokens):
 def cancel(tokens):
     """
     TODO: Extra Credit
+    <appointment_id>
     """
-    pass
+    global current_caregiver
+    global current_patient
+    if current_patient is None and current_caregiver is None:
+        print("Please login first")
+        return
+
+    #token check
+    if len(tokens) != 2:
+        print("Please try again")
+        return
+    
+    appt_id = tokens[1]
+
+    get_appt_info = "SELECT vac_name, Time, caregiver_name FROM Appointments WHERE appointment_id = %s"
+    delete_appt = "DELETE FROM Appointments WHERE appointment_id = %s"
+    add_availability = "INSERT INTO Availabilities VALUES (%s, %s)"
+
+
+    try:
+        cm = ConnectionManager()
+        conn = cm.create_connection()
+        cursor = conn.cursor(as_dict=True)
+
+        #get appt info
+        cursor.execute(get_appt_info, (appt_id))
+        appt_info = cursor.fetchone()
+        if not appt_info:
+            print("Appointment does not exist.")
+            return
+
+        #delete appointment
+        cursor.execute(delete_appt, (appt_id))
+        conn.commit()
+
+        #update vaccine doses
+        vaccine = Vaccine(appt_info['vac_name'], 0)
+        vaccine = vaccine.get()
+        if vaccine:
+            vaccine.increase_available_doses(1)
+
+        #update caregiver availability
+        cursor.execute(add_availability, (appt_info['Time'], appt_info['caregiver_name']))
+        conn.commit()
+
+        print(f"Appointment {appt_id} successfully canceled")
+
+    except pymssql.Error as e:
+        print("Please try again")
+        return
+    except Exception as e:
+        print("Please try again")
+        print("Error:", e)
+        return
+    finally:
+        cm.close_connection()
+
+    return
+
+    
+
 
 
 def add_doses(tokens):
@@ -567,6 +638,12 @@ def show_appointments(tokens):
     #check if user is logged in
     if current_patient is None and current_caregiver is None:
         print("Please login first:")
+        return
+    
+
+    #  check 2: the length for tokens need to be exactly 1 to include all information (with the operation name)
+    if len(tokens) != 1:
+        print("Please try again!")
         return
     
     if current_patient is not None:
@@ -641,6 +718,12 @@ def logout(tokens):
     # see if someone is logged in
     global current_caregiver
     global current_patient
+
+    #  check 2: the length for tokens need to be exactly 1 to include all information (with the operation name)
+    if len(tokens) != 1:
+        print("Please try again!")
+        return
+
     if current_caregiver is None and current_patient is None:
         print("Please login first")
         return
@@ -654,6 +737,22 @@ def logout(tokens):
         return
     
 
+def password_strength(password):
+    if len(password) < 8:
+        print("Password must be 8 characters or greater.")
+        return False
+    if not any(char.isupper() for char in password) or not any(char.islower() for char in password):
+        print("Password must contain uppercase and lowercase letters.")
+        return False
+    if not any(char.isdigit() for char in password) or not any(char.isalpha() for char in password):
+        print("Password must contain letters and numbers.")
+        return False
+    special_chars = "!@#?"
+    if not any(char in special_chars for char in password):
+        print("Password must contain !, @, #, or ?")
+        return False
+    
+    return True
 
 
 
@@ -717,6 +816,8 @@ def start():
             add_doses(tokens)
         elif operation == "show_appointments":
             show_appointments(tokens)
+        elif operation == "cancel":
+            cancel(tokens)
         elif operation == "logout":
             logout(tokens)
         elif operation == "quit":
